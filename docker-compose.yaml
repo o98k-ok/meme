@@ -1,0 +1,77 @@
+# Deploy somewhere clients can reach (commonly a private network host —
+# Tailscale, WireGuard, VPN, or LAN). Typical workflow:
+#
+#   rsync -avz --delete <repo> <user>@<host>:/path/to/repo
+#   ssh <user>@<host> 'cd /path/to/repo && docker compose up -d --build'
+#
+# Once up, clients can hit (replace <host> with the address you bound below):
+#   http://<host>:18080/healthz
+#   http://<host>:18080/tools/list_sources
+#   http://<host>:18080/tools/search/doutula?keyword=猫&limit=20&timeout=3
+#   http://<host>:18080/img?u=<encoded original url>&r=<encoded referer>
+#
+# Use this endpoint as MEME_API_BASE for the meme-mcp Node forwarder (see
+# README) — chat clients, plugins, etc. can target it via a single env var.
+
+services:
+  meme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meme-server:local
+    container_name: meme-server
+    restart: unless-stopped
+    # Default: bind only to loopback so the service is not exposed by
+    # accident. Replace `127.0.0.1` with your private-network IP (Tailscale,
+    # WireGuard, LAN) before running on a multi-user box. Don't bind to
+    # `0.0.0.0` unless you really want this public — the image proxy
+    # endpoint is unauthenticated.
+    ports:
+      - "127.0.0.1:18080:18080"
+    environment:
+      # MEME_PUBLIC_URL tells applyImageProxy() how clients see this server,
+      # so qudoutu / doutub image URLs get rewritten to
+      # <MEME_PUBLIC_URL>/img?u=...&r=... which the same server then
+      # reverse-proxies with the right Referer. Set this to whatever URL
+      # external clients actually use to reach you (including the bound
+      # IP and port from the `ports:` mapping above).
+      MEME_PUBLIC_URL: "http://localhost:18080"
+      # Optional: enable the Douyin source by pasting your douyin.com cookie
+      # here. Leave blank to skip that source. Don't commit it.
+      DOUYIN_COOKIE: ""
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # Static file server for the meme-mcp Node tarball, so MCP clients can do:
+  #   npx -y http://<host>:18081/meme-mcp-0.1.0.tgz
+  # without us running a real npm registry. ./dist-static is populated by
+  # `(cd mcp && npm run pack:dist)` — see the "发布新版 meme-mcp" section in
+  # README.md.
+  npm-dist:
+    image: caddy:2-alpine
+    container_name: meme-npm-dist
+    restart: unless-stopped
+    # Same loopback default as `meme`. Override to your private-network IP
+    # if remote clients need to npx-pull the tarball.
+    ports:
+      - "127.0.0.1:18081:18081"
+    volumes:
+      - ./dist-static:/srv:ro
+    command:
+      - caddy
+      - file-server
+      - --root
+      - /srv
+      - --listen
+      - ":18081"
+      - --browse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18081/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 3s

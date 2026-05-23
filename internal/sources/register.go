@@ -1,8 +1,19 @@
 package sources
 
-import "github.com/shadow/meme/internal/core"
+import (
+	"os"
 
-// RegisterAllSources 注册所有内置源到注册中心
+	"github.com/shadow/meme/internal/core"
+)
+
+// RegisterAllSources 注册所有内置源到注册中心。
+//
+// qudoutu 和 doutub 强制开启了 Referer 防盗链，必须由 server 端做图片代理
+// 才能在客户端正常显示。这里有两种"有代理能力"的判定：
+//   - config.ImageProxyURL 非空：外部代理模板（老路径，CLI 主要用）
+//   - MEME_PUBLIC_URL 非空：HTTP 模式下，server 自带 /img 反代（新路径）
+//
+// 任一满足就注册这两个源，否则跳过它们以免返回 404 图。
 func RegisterAllSources(registry *core.Registry, config *Config) {
 	// 注册无需认证的源
 	registry.Register(NewDoutula())
@@ -10,8 +21,8 @@ func RegisterAllSources(registry *core.Registry, config *Config) {
 	registry.Register(NewSougou())
 
 	if config != nil {
-		// 注册需要代理的源 (qudoutu, doutub)
-		if config.ImageProxyURL != "" {
+		hasProxy := config.ImageProxyURL != "" || os.Getenv("MEME_PUBLIC_URL") != ""
+		if hasProxy {
 			registry.Register(NewQudoutu())
 			registry.Register(NewDoutub())
 		}

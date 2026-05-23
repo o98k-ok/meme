@@ -116,16 +116,31 @@ func fetchHTML(ctx context.Context, client *http.Client, targetURL string, heade
 	return doc, nil
 }
 
-// applyImageProxy 如果配置了 IMAGE_PROXY_URL 环境变量，则对图片 URL 进行代理处理
-// 支持占位符: {URL} 或 {SOURCE_URL} 表示原图地址, {REFERER} 表示 Referer
+// applyImageProxy rewrites a hotlink-protected image URL so a downstream
+// client (browser, launcher webview) can fetch it. Two strategies, in order:
+//
+//  1. MEME_PUBLIC_URL — the server's own externally reachable base URL.
+//     When set, we rewrite to `<MEME_PUBLIC_URL>/img?u=<imgURL>&r=<referer>`,
+//     and the HTTP-mode server (see internal/httpapi) reverse-proxies the
+//     image with the right Referer header. No external proxy needed.
+//
+//  2. IMAGE_PROXY_URL — a templated URL of an external proxy service.
+//     Placeholders: `{URL}` / `{SOURCE_URL}` (original URL) and `{REFERER}`.
+//
+// Neither set means the original URL is returned unchanged (most sources
+// don't enforce referer checks; only qudoutu / doutub do).
 func applyImageProxy(imgURL, referer string) string {
+	encodedURL := url.QueryEscape(imgURL)
+	encodedReferer := url.QueryEscape(referer)
+
+	if pub := strings.TrimRight(os.Getenv("MEME_PUBLIC_URL"), "/"); pub != "" {
+		return fmt.Sprintf("%s/img?u=%s&r=%s", pub, encodedURL, encodedReferer)
+	}
+
 	proxyTmpl := os.Getenv("IMAGE_PROXY_URL")
 	if proxyTmpl == "" {
 		return imgURL
 	}
-
-	encodedURL := url.QueryEscape(imgURL)
-	encodedReferer := url.QueryEscape(referer)
 
 	result := strings.ReplaceAll(proxyTmpl, "{SOURCE_URL}", encodedURL)
 	result = strings.ReplaceAll(result, "{URL}", encodedURL)

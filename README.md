@@ -20,115 +20,220 @@
 | `doutula` | 斗图啦 | doutupk.com | 无 |
 | `pdan` | 胖哒 | pdan.com.cn | 无 |
 | `sougou` | 搜狗表情 | pic.sogou.com | 无 |
-| `qudoutu` | 趣斗图 | qudoutu.cn | ⚠️ 需配置 `IMAGE_PROXY_URL` |
-| `doutub` | 表情包API | api.doutub.com | ⚠️ 需配置 `IMAGE_PROXY_URL` |
+| `qudoutu` | 趣斗图 | qudoutu.cn | 需 server 端能反代图片（HTTP 模式自动满足） |
+| `doutub` | 表情包API | api.doutub.com | 同上 |
 | `douyin` | 抖音 | douyin.com | 🔐 需配置 `DOUYIN_COOKIE` |
 
-> **注意**: 如果未配置相应的环境变量，对应的源将**不会被初始化**，也不会出现在搜索结果中。
+> qudoutu / doutub 的图片 CDN 检查 Referer 才放图。**HTTP 模式下 server 自带 `/img` 反代**，自动用对的 Referer 帮客户端拉图，使用者无需配代理 URL。
 
-## 🛠️ 配置说明
+## 🛠️ 配置
 
-### 1. 图片代理配置 (`IMAGE_PROXY_URL`)
+### HTTP 模式（推荐）
 
-部分源（如`qudoutu`、`doutub`）开启了严格的防盗链保护，直接访问图片链接会返回 404。配置此环境变量后，返回的图片链接将被重写为代理地址。
-
-**格式**:
-您的代理服务地址，支持以下占位符：
-- `{URL}` 或 `{SOURCE_URL}`: 原始图片链接 (会自动 URL 编码)
-- `{REFERER}`: 该图片源对应的 Referer (会自动 URL 编码)
-
-**示例**:
-```bash
-export IMAGE_PROXY_URL="https://my-proxy-worker.com/image?url={URL}&referer={REFERER}"
-```
-
-### 2. 抖音 Cookie (`DOUYIN_COOKIE`)
-
-搜索抖音表情包需要有效的 Cookie。您可以在浏览器登录抖音网页版，按 F12 打开开发者工具，复制请求中的 Cookie 字符串。
+只需要一个环境变量：
 
 ```bash
-export DOUYIN_COOKIE="your_cookie_string_here"
+# clients 看到的 server 地址（用于把 qudoutu/doutub 图片 URL 改写到 /img）。
+# 改成你部署机的实际地址（私网 IP、域名、或本机 loopback 测试时填 127.0.0.1）。
+export MEME_PUBLIC_URL="http://<host>:18080"
+./build/meme-server --http :18080
 ```
+
+带上 `MEME_PUBLIC_URL` 后，qudoutu 和 doutub 这两个需要反代的源会自动注册，且返回的图片 URL 形如 `<MEME_PUBLIC_URL>/img?u=...&r=...`，客户端当成普通图片地址用即可。docker-compose.yaml 已默认这样配。
+
+### 抖音 Cookie（可选）
+
+抖音源需要登录态。在浏览器登录 douyin.com 后从 DevTools 复制整段 cookie：
+
+```bash
+export DOUYIN_COOKIE="..."
+```
+
+### `IMAGE_PROXY_URL`（CLI 用户兜底）
+
+只有在跑老的 stdio CLI / 单文件二进制、又想要 qudoutu/doutub 源、又没法暴露 HTTP 服务时才需要。模板支持 `{URL}` / `{SOURCE_URL}` / `{REFERER}` 占位符。HTTP 模式下应优先用 `MEME_PUBLIC_URL`。
 
 ## 🚀 快速开始
 
-### 构建
+### 二进制构建（Go server）
 
 ```bash
-# 下载依赖
-make deps
-
-# 构建 Server 和 CLI
-make build-all
+make build           # 出 build/meme-server (HTTP / stdio MCP 二合一)
+make build-cli       # 出 build/meme-cli (本地搜索测试用)
 ```
 
-### 命令行工具 (CLI) 测试
-
-项目自带一个功能强大的 CLI 工具，方便测试和检索。
+### CLI 测试
 
 ```bash
-# 基础搜索
-./build/meme-cli -k "猫"
-
-# 指定源搜索 (需配置代理才会有 qudoutu)
-export IMAGE_PROXY_URL="..."
-./build/meme-cli -k "狗" -s qudoutu,doutub -l 5
-
-# 列出当前可用的源 (检查配置是否生效)
-./build/meme-cli -list
+./build/meme-cli -k "猫" -l 5         # 基本搜索
+./build/meme-cli -list                # 列出当前已加载源
+./build/meme-cli -k "狗" -s pdan -l 3 # 限定源
 ```
 
-### 运行 MCP Server
+### 启动 Server
 
 ```bash
-# 设置环境变量并运行
-export IMAGE_PROXY_URL="https://..."
-export DOUYIN_COOKIE="..."
+# HTTP 模式（推荐）
+MEME_PUBLIC_URL="http://127.0.0.1:18080" ./build/meme-server --http :18080
+
+# 或者老的 stdio MCP 模式
 ./build/meme-server
 ```
 
+### Docker 一键起
+
+```bash
+sudo docker compose up -d --build
+```
+
+`docker-compose.yaml` 定义两个 service，默认都绑在 `127.0.0.1` loopback 上（避免无心暴露公网）。需要让别的设备访问时把 `ports:` 改成对应私网 IP（Tailscale / WireGuard / LAN 任选）：
+
+| Service | 端口 | 镜像 | 干嘛 |
+| --- | --- | --- | --- |
+| `meme` | `:18080` | 本仓库 Dockerfile 编译 | Go HTTP API（搜索 + `/img` 反代）。设置 `MEME_PUBLIC_URL` 让 server 把 qudoutu/doutub 的图片 URL 改写到自家 `/img` |
+| `npm-dist` | `:18081` | `caddy:2-alpine` | 静态托管 `./dist-static/*.tgz`。客户端 `npx -y http://<host>:18081/meme-mcp-VERSION.tgz` 拉的就是这里 |
+
+⚠️ **/img 反代是无鉴权的图片代理**，绑到公网前自己掂量；本仓库默认 loopback 就是这个原因。改 IP / 端口都在 `docker-compose.yaml` 顶部 `ports:` 里改一处即可。
+
+`/img` 反代对上游 TLS 故意宽容（`InsecureSkipVerify`）——图片 CDN 经常证书域名不匹配（比如 sogou 的图实际在 `img.rsdbox.cn`，证书是 `*.ctcdn.cn`），且响应是图片字节不是凭据，不引入额外信任面。
+
 ## 🤖 AI 客户端集成
 
-### 配置 Claude Desktop
+### 推荐：`npx` 拉远端 tarball
 
-编辑配置文件:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+最省事的方式——不用本地编译、不用 Go 环境。客户端只要有 Node 18+，就能直接：
 
-```json
+```jsonc
+// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
+// Replace <host> with the address where you've published the npm-dist tarball
+// and the Go backend (they may or may not be the same host / port).
 {
   "mcpServers": {
     "meme": {
-      "command": "/absolute/path/to/meme-server",
+      "command": "npx",
+      "args": ["-y", "http://<host>:18081/meme-mcp-0.1.0.tgz"],
       "env": {
-        "IMAGE_PROXY_URL": "https://your-proxy-service.com/?src={URL}&referer={REFERER}",
-        "DOUYIN_COOKIE": "your_cookie_here"
+        "MEME_API_BASE": "http://<host>:18080"
       }
     }
   }
 }
 ```
 
-### 配置 Cursor
+`meme-mcp` 是一个 stdio MCP forwarder（[mcp/](./mcp/)），内部把每个 tool 调用转给 `MEME_API_BASE` 的 HTTP 接口。所有 6 个 tool（`search_meme`, `search_doutula`, `search_pdan`, …）自动从远端发现并暴露。
 
-在 Cursor 的 MCP 设置中添加一个新的 Server：
+Cursor 配置同形态：Type=stdio，Command=`npx`，Args=`-y http://<host>:18081/meme-mcp-0.1.0.tgz`，Env 加 `MEME_API_BASE`。
 
-- **Type**: `stdio`
-- **Command**: `/absolute/path/to/meme-server`
-- **Environment Variables**: 添加 `IMAGE_PROXY_URL` 和 `DOUYIN_COOKIE`
+### 备选：本地 stdio 二进制
+
+如果你本机就跑着 Go server，或者完全离线测试：
+
+```jsonc
+{
+  "mcpServers": {
+    "meme": {
+      "command": "/absolute/path/to/meme-server",
+      "env": {
+        "MEME_PUBLIC_URL": "http://127.0.0.1:18080",
+        "DOUYIN_COOKIE": ""
+      }
+    }
+  }
+}
+```
+
+这种模式下需要另外开一个 HTTP server 给 `/img` 用（或者写 `IMAGE_PROXY_URL` 把图片代理外包出去），所以多数场景还是首选上面的 npx 路径。
+
+### 发布新版 `meme-mcp`
+
+[`mcp/`](./mcp/) 是一个独立的 TypeScript Node 项目，构建出 `dist/index.js`（带 shebang，可执行），打成 `.tgz` 后由 `npm-dist` service 暴露给客户端。完整发版流程：
+
+```bash
+cd mcp
+
+# 1. 改 src/index.ts 后 bump 版本（patch / minor / major）
+npm version patch
+
+# 2. build + pack 到 ../dist-static/
+npm run pack:dist
+# 产物: ../dist-static/meme-mcp-0.1.1.tgz
+
+# 3. rsync 到部署目标（替换 <user>/<host>/<path> 成你的实际值）
+rsync -avz ../dist-static/ <user>@<host>:/path/to/repo/dist-static/
+
+# 4. 客户端配置里把 URL 的版本号同步成新值，例如:
+#    "args": ["-y", "http://<host>:18081/meme-mcp-0.1.1.tgz"]
+```
+
+`caddy` service 是只读 mount，不需要重启 docker compose。版本号在 URL 路径里，所以客户端 `npx` 缓存按 URL 命中——升级 = 改一行 URL。
 
 ## 📦 MCP Tools
 
 ### `search_meme`
-搜索表情包。
+聚合搜索（并发请求所有源后去重）。
 
-- `keyword` (string): 搜索关键词
-- `sources` (array): 指定搜索源 ID (可选)
-- `page` (number): 页码
-- `limit` (number): 数量限制
+- `keyword` (string, required): 搜索关键词
+- `sources` (array, optional): 指定搜索源 ID 列表
+- `page` (number, optional, default 1)
+- `limit` (number, optional, default 20)
+- `timeout` (number, optional, default 10): 单源超时（秒），上限 30。受限客户端（Raycast / deal）建议压到 2-3。
+
+> ⚠️ 注意：聚合接口仍会等待所有被命中的源全部结束才回复，所以**整体响应受最慢源影响**。如果客户端有严格的总耗时上限，请优先使用下面的"单源工具"。
+
+### `search_<source_id>`
+为每个数据源单独注册一个 tool（`search_doutula`, `search_pdan`, `search_sougou`, `search_qudoutu`, `search_doutub`, `search_douyin`）。只查一个源，不会被慢源拖累。
+
+- `keyword` (string, required)
+- `page` (number, optional, default 1)
+- `limit` (number, optional, default 20)
+- `timeout` (number, optional, default 10): 上限 30 秒
 
 ### `list_sources`
 列出当前已加载并可用的数据源。
+
+## 🌐 HTTP 模式
+
+除了 stdio MCP 协议外，server 还能以 HTTP REST 模式启动，方便不能直接走 stdio 的客户端（shell 脚本、deal launcher 的 plugin 等）调用：
+
+```bash
+# CLI flag
+./build/meme-server --http :18080
+
+# 或环境变量
+MEME_HTTP_LISTEN=:18080 ./build/meme-server
+```
+
+启动后暴露的 endpoint：
+
+| 路径 | 说明 |
+| --- | --- |
+| `GET /healthz` | 健康检查，返回 `ok\n` |
+| `GET /tools/list_sources` | JSON 列出所有源 |
+| `GET /tools/search?keyword=&sources=a,b&limit=&page=&timeout=` | 聚合搜索（同 `search_meme`） |
+| `GET /tools/search/<source_id>?keyword=&limit=&timeout=&page=` | 单源搜索 |
+| `GET /img?u=<encoded url>&r=<encoded referer>` | 图片反代：用指定 Referer 拉上游图，再把字节流式回给客户端，绕过 qudoutu / doutub 的防盗链 |
+
+### 配合 `MEME_PUBLIC_URL`
+
+HTTP 模式下建议设置 `MEME_PUBLIC_URL` 为该 server 的对外可达地址（例如 `http://<host>:18080` 或本机 `http://127.0.0.1:18080`）。设置后，需要代理的源（qudoutu / doutub）返回的图片 URL 会被改写成 `<MEME_PUBLIC_URL>/img?u=...&r=...`，客户端直接当普通图片 URL 用即可，无需再配第三方代理（即不需要老的 `IMAGE_PROXY_URL`）。
+
+如果两个都设了，`MEME_PUBLIC_URL` 优先。
+
+## 🐳 Docker 部署
+
+仓库根目录提供 `Dockerfile` + `docker-compose.yaml`，默认两个 service 都绑在 `127.0.0.1` loopback 上。**对外暴露前请按需要在 `ports:` 段改成你的私网 IP（Tailscale / WireGuard / LAN）**——`/img` 反代是无鉴权的，不建议直接绑公网。
+
+```bash
+# 在目标机器上（已装 docker + compose v2）
+git pull   # 或 rsync 过来
+sudo docker compose up -d --build
+
+# 验证（默认 loopback；如你改了 ports 绑定就把 127.0.0.1 换成对应 IP）
+curl http://127.0.0.1:18080/healthz
+curl 'http://127.0.0.1:18080/tools/search/doutula?keyword=猫&limit=5&timeout=3'
+```
+
+镜像内置 alpine 的 ca-certificates，可以直接 HTTPS 出口拉源站。镜像通过 `goproxy.cn` 拉 Go 依赖，中国大陆服务器能正常构建。
 
 ## 📄 License
 
