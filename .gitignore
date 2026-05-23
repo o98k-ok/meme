@@ -1,0 +1,13 @@
+# Go build output (re-createable via `make build*`)
+build/
+
+# Node packages — meme-mcp under mcp/ has its own .gitignore but list here
+# as belt-and-suspenders.
+mcp/node_modules/
+mcp/dist/
+mcp/*.tgz
+
+# Local env / secrets — none today, future-proof
+.env
+.env.*
+!.env.example

@@ -1,42 +1,52 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/shadow/meme/internal/core"
+	"github.com/shadow/meme/internal/httpapi"
 	"github.com/shadow/meme/internal/sources"
 	"github.com/shadow/meme/internal/tools"
 )
 
 func main() {
-	// 创建注册中心
-	registry := core.NewRegistry()
+	// --http :18080 → expose tools as HTTP REST (for clients that can't speak
+	// stdio MCP, e.g. shell scripts behind the deal launcher's plugin
+	// runtime). Empty (default) keeps the original stdio MCP transport.
+	// Env override MEME_HTTP_LISTEN wins if the flag is left blank.
+	httpAddr := flag.String("http", "", "listen on <addr> as an HTTP REST server (e.g. :18080); blank = stdio MCP")
+	flag.Parse()
+	if *httpAddr == "" {
+		*httpAddr = os.Getenv("MEME_HTTP_LISTEN")
+	}
 
-	// 从环境变量读取配置
+	registry := core.NewRegistry()
 	config := &sources.Config{
 		DouyinCookie:  os.Getenv("DOUYIN_COOKIE"),
 		ImageProxyURL: os.Getenv("IMAGE_PROXY_URL"),
 	}
-
-	// 注册所有源
 	sources.RegisterAllSources(registry, config)
 
-	// 创建 MCP Server
+	if *httpAddr != "" {
+		if err := httpapi.Serve(*httpAddr, registry); err != nil {
+			fmt.Fprintf(os.Stderr, "http server error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Stdio MCP path (unchanged transport, just the new tool set).
 	s := server.NewMCPServer(
 		"meme-server",
-		"1.0.0",
+		"1.1.0",
 		server.WithToolCapabilities(true),
 	)
-
-	// 注册 Tools
-	s.AddTool(tools.NewSearchMemeTool(registry), tools.HandleSearchMeme(registry))
-	s.AddTool(tools.NewListSourcesTool(), tools.HandleListSources(registry))
-
-	// 启动 Stdio 服务
+	tools.RegisterAll(s, registry)
 	if err := server.ServeStdio(s); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "stdio server error: %v\n", err)
 		os.Exit(1)
 	}
 }

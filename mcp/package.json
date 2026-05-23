@@ -1,0 +1,30 @@
+{
+  "name": "meme-mcp",
+  "version": "0.1.0",
+  "description": "Stdio MCP server that forwards meme search calls to a remote HTTP backend (cmd/server in --http mode).",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "meme-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"import('node:fs').then(fs => fs.promises.chmod('dist/index.js', 0o755))\"",
+    "pack:dist": "npm run build && npm pack --pack-destination ../dist-static",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
